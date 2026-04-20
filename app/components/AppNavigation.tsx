@@ -84,8 +84,7 @@ export default function AppNavigation({ children }: { children: React.ReactNode 
       <main className="flex min-h-screen flex-1 flex-col overflow-y-auto bg-[#f8fafc] p-6 dark:bg-slate-950">
         <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm font-medium text-slate-800 dark:text-slate-100">Navigation Rapide</p>
-            <div className="ml-auto flex items-center gap-2">
+            =            <div className="ml-auto flex items-center gap-2">
               <div className="flex flex-wrap items-center justify-end gap-2 md:hidden">
                 {LINKS.map((link) => (
                   <Link

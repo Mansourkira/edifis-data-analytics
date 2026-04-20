@@ -5,7 +5,7 @@ import { Download, Loader2, Printer, RefreshCw, Search } from "lucide-react";
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { createBrowserSupabaseClient } from "../lib/supabase/client";
 import ChartSizeGate from "./ChartSizeGate";
-import { exportElementToPdf } from "../lib/export-pdf";
+import { exportElementToPdf, waitForPdfDomStable } from "../lib/export-pdf";
 import { useTheme } from "./ThemeProvider";
 
 type DashboardRow = {
@@ -300,13 +300,13 @@ export default function CommercialDashboard() {
   );
 
   const handleExportPdf = async () => {
-    if (!pdfRootRef.current || pdfExporting) return;
+    if (!pdfRootRef.current || pdfExporting || loading || error) return;
     try {
       setPdfExporting(true);
+      await waitForPdfDomStable();
       await exportElementToPdf(pdfRootRef.current, `tableau-commercial-${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (e) {
       console.error(e);
-      window.alert("Export PDF impossible. Reessayez apres le chargement complet des graphiques.");
     } finally {
       setPdfExporting(false);
     }
@@ -512,7 +512,7 @@ export default function CommercialDashboard() {
               icon={Printer}
               label={pdfExporting ? "PDF..." : "Imprimer PDF"}
               onClick={handleExportPdf}
-              disabled={pdfExporting}
+              disabled={pdfExporting || loading || !!error}
             />
             <ActionButton icon={RefreshCw} label="Rafraîchir" onClick={loadDashboard} />
           </div>

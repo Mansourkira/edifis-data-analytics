@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Loader2, Minus, Printer, TrendingDown } from "lucide-react";
 import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { createBrowserSupabaseClient } from "../lib/supabase/client";
-import { exportElementToPdf } from "../lib/export-pdf";
+import { exportElementToPdf, waitForPdfDomStable } from "../lib/export-pdf";
 import ChartSizeGate from "./ChartSizeGate";
 import { useTheme } from "./ThemeProvider";
 
@@ -176,16 +176,16 @@ export default function PalmaresRevendeurs() {
   );
 
   const handleExportPdf = async () => {
-    if (!pdfRootRef.current || pdfExporting) return;
+    if (!pdfRootRef.current || pdfExporting || loading || error) return;
     try {
       setPdfExporting(true);
+      await waitForPdfDomStable();
       await exportElementToPdf(
         pdfRootRef.current,
         `palmares-revendeurs-${new Date().toISOString().slice(0, 10)}.pdf`,
       );
     } catch (e) {
       console.error(e);
-      window.alert("Export PDF impossible. Reessayez apres le chargement complet des graphiques.");
     } finally {
       setPdfExporting(false);
     }
@@ -378,7 +378,7 @@ export default function PalmaresRevendeurs() {
               <button
                 type="button"
                 onClick={handleExportPdf}
-                disabled={pdfExporting || loading}
+                disabled={pdfExporting || loading || !!error}
                 className="inline-flex h-8 items-center gap-1 rounded border border-slate-300 bg-white px-3 text-xs text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               >
                 <Printer size={14} />

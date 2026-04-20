@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Loader2, Minus, Printer, TrendingDown } from "lucide-react";
 import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { formatCurrencyTnd } from "../lib/format-currency";
 import { createBrowserSupabaseClient } from "../lib/supabase/client";
 import { exportElementToPdf, waitForPdfDomStable } from "../lib/export-pdf";
 import ChartSizeGate from "./ChartSizeGate";
@@ -43,10 +44,6 @@ function asNumber(value: unknown): number {
 
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
-}
-
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(value);
 }
 
 function formatPct(value: number): string {
@@ -285,10 +282,10 @@ export default function PalmaresRevendeurs() {
                           {row.reseller}
                         </td>
                         <td className="border border-slate-200 px-2 py-1.5 text-[10px] dark:border-slate-600">
-                          {row.monthly.map((m, mIdx) => `${MONTHS[mIdx]}:${formatCurrency(m)}`).join(" | ")}
+                          {row.monthly.map((m, mIdx) => `${MONTHS[mIdx]}:${formatCurrencyTnd(m, 0)}`).join(" | ")}
                         </td>
                         <td className="border border-slate-200 px-2 py-1.5 text-right dark:border-slate-600">
-                          {formatCurrency(row.total2026)}
+                          {formatCurrencyTnd(row.total2026, 0)}
                         </td>
                         <td className={`border border-slate-200 px-2 py-1.5 text-right dark:border-slate-600 ${row.evolVs2025 >= 0 ? "text-emerald-600" : "text-red-500"}`}>
                           {formatPct(row.evolVs2025)}
@@ -325,10 +322,10 @@ export default function PalmaresRevendeurs() {
                       TOTAL GLOBAL
                     </td>
                     <td className="border border-slate-300 px-2 py-2 text-[10px] dark:border-slate-600">
-                      {totals.monthly.map((m, i) => `${MONTHS[i]}:${formatCurrency(m)}`).join(" | ")}
+                      {totals.monthly.map((m, i) => `${MONTHS[i]}:${formatCurrencyTnd(m, 0)}`).join(" | ")}
                     </td>
                     <td className="border border-slate-300 px-2 py-2 text-right dark:border-slate-600">
-                      {formatCurrency(totals.y2026)}
+                      {formatCurrencyTnd(totals.y2026, 0)}
                     </td>
                     <td className="border border-slate-300 px-2 py-2 text-right text-emerald-700 dark:border-slate-600 dark:text-emerald-400">
                       {formatPct(pctEvolution(totals.y2026, totals.y2025))}
@@ -359,7 +356,7 @@ export default function PalmaresRevendeurs() {
                           ))}
                         </Pie>
                         <Tooltip
-                          formatter={(v) => formatCurrency(Number(v))}
+                          formatter={(v) => formatCurrencyTnd(Number(v), 0)}
                           contentStyle={tooltipStyle}
                         />
                       </PieChart>

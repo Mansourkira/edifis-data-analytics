@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 import {
   APP_AUTH_STORAGE_KEY,
@@ -21,7 +20,6 @@ function getExpectedPassword(): string {
 type Phase = "checking" | "locked" | "unlocked";
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const [phase, setPhase] = useState<Phase>("checking");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -53,9 +51,8 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       setError("Impossible d'enregistrer la session.");
       return;
     }
-    setPhase("unlocked");
-    setPassword("");
-    router.push("/commercial");
+    /* Full navigation avoids briefly mounting `/` (layout children) before client routing. */
+    window.location.replace("/commercial");
   };
 
   if (phase === "checking") {
@@ -80,7 +77,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
             Accès sécurisé
           </h1>
           <p className="mb-4 text-center text-xs text-slate-500 dark:text-slate-400">
-            Saisissez le mot de passe pour accéder au tableau de bord.
+            Saisissez le mot de passe pour accéder au tableau de bord commercial.
           </p>
           <label htmlFor="app-password" className="sr-only">
             Mot de passe

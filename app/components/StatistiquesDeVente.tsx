@@ -12,6 +12,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { formatCurrencyTnd } from "../lib/format-currency";
 import { createBrowserSupabaseClient } from "../lib/supabase/client";
 import { exportElementToPdf, waitForPdfDomStable } from "../lib/export-pdf";
 import ChartSizeGate from "./ChartSizeGate";
@@ -39,10 +40,6 @@ function asNumber(value: unknown): number {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(value);
-}
-
-function formatMoney(value: number): string {
-  return new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
 
 function seeded(seed: number, min: number, max: number): number {
@@ -394,7 +391,7 @@ function FragmentYear({
             {formatNumber(row.quantity)}
           </td>
           <td className="border-b border-slate-100 px-2 py-1.5 text-right dark:border-slate-600 dark:text-slate-200">
-            {formatMoney(row.totalHt)}
+            {formatCurrencyTnd(row.totalHt)}
           </td>
         </tr>
       ))}
@@ -407,7 +404,7 @@ function FragmentYear({
             {formatNumber(subtotal.quantity)}
           </td>
           <td className="border-y border-[#c7dbf1] px-2 py-1.5 text-right dark:border-sky-800">
-            {formatMoney(subtotal.totalHt)}
+            {formatCurrencyTnd(subtotal.totalHt)}
           </td>
         </tr>
       )}

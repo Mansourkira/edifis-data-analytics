@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Loader2, Printer, RefreshCw, Search } from "lucide-react";
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { formatCurrencyTnd } from "../lib/format-currency";
 import { createBrowserSupabaseClient } from "../lib/supabase/client";
 import ChartSizeGate from "./ChartSizeGate";
 import { exportElementToPdf, waitForPdfDomStable } from "../lib/export-pdf";
@@ -67,16 +68,6 @@ function asDate(value: unknown): Date | null {
   if (typeof value !== "string" || !value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-/** EUR with narrow no-break space as thousands separator (French ERP style). */
-function formatCurrencyEur(value: number): string {
-  return new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
 }
 
 function formatIntegerFr(value: number): string {
@@ -365,7 +356,7 @@ export default function CommercialDashboard() {
                   <span className="truncate">{item.name}</span>
                 </span>
                 <span className="shrink-0 tabular-nums text-slate-800 dark:text-slate-200">
-                  {formatCurrencyEur(item.value)}
+                  {formatCurrencyTnd(item.value)}
                 </span>
               </div>
             ))}
@@ -416,7 +407,7 @@ export default function CommercialDashboard() {
                         </td>
                         <td className="px-2 py-1 text-right tabular-nums">{formatIntegerFr(row.quantity)}</td>
                         <td className="px-2 py-1 text-right font-medium tabular-nums text-slate-900 dark:text-slate-100">
-                          {formatCurrencyEur(row.totalHt)}
+                          {formatCurrencyTnd(row.totalHt)}
                         </td>
                       </tr>
                     ))}
@@ -430,7 +421,7 @@ export default function CommercialDashboard() {
                         {formatIntegerFr(totals.quantity)}
                       </td>
                       <td className="border-t border-slate-200 px-2 py-1 text-right text-base tabular-nums text-[#1f4f7a] dark:border-slate-600 dark:text-sky-300">
-                        {formatCurrencyEur(totals.totalHt)}
+                        {formatCurrencyTnd(totals.totalHt)}
                       </td>
                     </tr>
                   </tfoot>
@@ -466,7 +457,7 @@ export default function CommercialDashboard() {
                         </Pie>
                         <Tooltip
                           formatter={(value) =>
-                            formatCurrencyEur(Number(Array.isArray(value) ? value[0] : (value ?? 0)))
+                            formatCurrencyTnd(Number(Array.isArray(value) ? value[0] : (value ?? 0)))
                           }
                           labelFormatter={(name) => String(name)}
                           contentStyle={tooltipContentStyle}
@@ -490,7 +481,7 @@ export default function CommercialDashboard() {
                                     maximumFractionDigits: 1,
                                   }).format((v / pieTotal) * 100)
                                 : "0,0";
-                            return `${String(value)} — ${formatCurrencyEur(v)} (${pct}%)`;
+                            return `${String(value)} — ${formatCurrencyTnd(v)} (${pct}%)`;
                           }}
                         />
                       </PieChart>

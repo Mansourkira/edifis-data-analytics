@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Loader2, Printer, RefreshCw, Search } from "lucide-react";
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatCurrencyTnd } from "../lib/format-currency";
 import { createBrowserSupabaseClient } from "../lib/supabase/client";
 import ChartSizeGate from "./ChartSizeGate";
@@ -21,6 +22,8 @@ type DashboardRow = {
   article: string;
   quantity: number;
   totalHt: number;
+  city: string;
+  region: string;
 };
 
 type DashboardPayload = {
@@ -54,6 +57,29 @@ const MONTHS_FR = [
 
 const PIE_COLORS = ["#3f7fc3", "#f5a24a", "#79c18d", "#e7c15a", "#b6b9c0", "#8c9ccb"];
 
+/** Gouvernorats + ville principale (données dérivées / démo — à lier à la base si colonnes dispo) */
+const TUNISIA_LOCATIONS: { city: string; region: string }[] = [
+  { city: "Tunis", region: "Tunis" },
+  { city: "Ariana", region: "Ariana" },
+  { city: "Ben Arous", region: "Ben Arous" },
+  { city: "Sfax", region: "Sfax" },
+  { city: "Sousse", region: "Sousse" },
+  { city: "Kairouan", region: "Kairouan" },
+  { city: "Bizerte", region: "Bizerte" },
+  { city: "Gabès", region: "Gabès" },
+  { city: "Gafsa", region: "Gafsa" },
+  { city: "Monastir", region: "Monastir" },
+  { city: "Nabeul", region: "Nabeul" },
+  { city: "Jendouba", region: "Jendouba" },
+];
+
+function cityRegionForLine(article: string, brand: string, monthIndex: number): { city: string; region: string } {
+  const h = article.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  const b = brand.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  const i = Math.abs(h + b * 7 + monthIndex * 13) % TUNISIA_LOCATIONS.length;
+  return TUNISIA_LOCATIONS[i]!;
+}
+
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
@@ -70,6 +96,35 @@ function asDate(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function parseDocYearMonth(docDate: string): { year: number; monthIndex: number } | null {
+  const slice = docDate.slice(0, 10);
+  const parts = slice.split("-").map(Number);
+  if (parts.length < 2 || !parts[0] || parts[1] === undefined) return null;
+  const year = parts[0];
+  const month = parts[1];
+  if (month < 1 || month > 12) return null;
+  return { year, monthIndex: month - 1 };
+}
+
+async function fetchAllSalesLines(supabase: SupabaseClient): Promise<Record<string, unknown>[]> {
+  const pageSize = 1000;
+  let offset = 0;
+  const all: Record<string, unknown>[] = [];
+  for (; ;) {
+    const { data, error } = await supabase
+      .from("sales_lines")
+      .select("doc_date, product_code, client_ct_num, commercial_co_no, quantity, total_ht")
+      .order("doc_date", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    const chunk = (data ?? []) as Record<string, unknown>[];
+    all.push(...chunk);
+    if (chunk.length < pageSize) break;
+    offset += pageSize;
+  }
+  return all;
+}
+
 function formatIntegerFr(value: number): string {
   return new Intl.NumberFormat("fr-FR", {
     maximumFractionDigits: 0,
@@ -79,13 +134,18 @@ function formatIntegerFr(value: number): string {
 async function fetchDashboardData(): Promise<DashboardPayload> {
   const supabase = createBrowserSupabaseClient();
 
-  const [productsResult, familiesResult] = await Promise.all([
+  const [lines, productsResult, familiesResult, clientsResult, commercialsResult] = await Promise.all([
+    fetchAllSalesLines(supabase),
     supabase.from("products").select("*"),
     supabase.from("families").select("*"),
+    supabase.from("clients").select("ct_num, name"),
+    supabase.from("commercials").select("co_no, code, first_name"),
   ]);
 
   if (productsResult.error) throw productsResult.error;
   if (familiesResult.error) throw familiesResult.error;
+  if (clientsResult.error) throw clientsResult.error;
+  if (commercialsResult.error) throw commercialsResult.error;
 
   const products = (productsResult.data ?? []) as Record<string, unknown>[];
   const families = (familiesResult.data ?? []) as Record<string, unknown>[];
@@ -100,81 +160,101 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
     );
   }
 
-  const normalizedProducts = products.map((product) => {
-    const familyCode = asString(
-      product.family_code ?? product.family ?? product.famille_code,
-      "N/A",
-    );
+  const productByCode = new Map<
+    string,
+    { familyCode: string; familyLabel: string; brand: string; article: string }
+  >();
+  for (const product of products) {
+    const code = asString(product.code ?? product.product_code);
+    if (!code) continue;
+    const familyCode = asString(product.family_code ?? product.family ?? product.famille_code, "N/A");
     const familyLabel = familyByCode.get(familyCode) ?? familyCode;
     const brand = asString(product.brand ?? product.marque, "Sans marque");
     const article = asString(
-      product.product_name ?? product.name ?? product.article ?? product.designation,
-      "Article",
+      product.name ?? product.product_name ?? product.article ?? product.designation,
+      code,
     );
-
-    const quantity = Math.max(0, asNumber(product.stock ?? product.quantity ?? 0));
-    const priceHt = asNumber(product.price_ht ?? product.price ?? product.unit_price ?? 0);
-    return { familyCode, familyLabel, brand, article, quantity, priceHt };
-  });
-
-  const grouped = new Map<
-    string,
-    { familyCode: string; familyLabel: string; brand: string; article: string; quantity: number; priceHt: number }
-  >();
-  for (const product of normalizedProducts) {
-    const key = `${product.familyCode}|${product.brand}|${product.article}`;
-    const current = grouped.get(key);
-    if (current) {
-      current.quantity += product.quantity;
-      const p = product.priceHt > 0 ? product.priceHt : current.priceHt;
-      const q = current.priceHt > 0 ? current.priceHt : product.priceHt;
-      current.priceHt = p > 0 ? p : q;
-    } else {
-      grouped.set(key, { ...product });
-    }
+    productByCode.set(code, { familyCode, familyLabel, brand, article });
   }
 
-  // Build mock monthly sales since there is no sales table yet.
-  const currentYear = new Date().getFullYear();
-  const template = Array.from(grouped.values());
-  const rows: DashboardRow[] = template.flatMap((item, itemIndex) => {
-    const monthCount = 3 + (itemIndex % 4);
-    return Array.from({ length: monthCount }, (_, idx) => {
-      const monthIndex = idx % 12;
-      const multiplier = 0.35 + ((itemIndex + idx) % 5) * 0.15;
-      const quantity = Math.max(1, Math.round(item.quantity * multiplier));
-      // If DB has no unit price, use a stable demo HT so TOTAL HT is never 0 when qty > 0
-      const unitHt =
-        item.priceHt > 0
-          ? item.priceHt
-          : 18.5 + (itemIndex * 37 + idx * 11 + item.article.length) % 4200;
-      const totalHt = Number((quantity * unitHt).toFixed(2));
+  const clientByCtNum = new Map<string, string>();
+  for (const c of clientsResult.data ?? []) {
+    const r = c as Record<string, unknown>;
+    const ctNum = asString(r.ct_num);
+    if (!ctNum) continue;
+    clientByCtNum.set(ctNum, asString(r.name, ctNum));
+  }
 
-      return {
-        year: currentYear,
-        monthIndex,
-        monthLabel: MONTHS_FR[monthIndex] ?? "N/A",
-        clientName: "SARL Martin",
-        commercial: "Jean Dupont",
-        familyCode: item.familyCode,
-        familyLabel: item.familyLabel,
-        brand: item.brand,
-        article: item.article,
-        quantity,
-        totalHt,
-      };
+  const commercialByCoNo = new Map<number, string>();
+  for (const cm of commercialsResult.data ?? []) {
+    const r = cm as Record<string, unknown>;
+    const coNo = r.co_no;
+    const n = typeof coNo === "number" ? coNo : Number(coNo);
+    if (!Number.isFinite(n)) continue;
+    const code = asString(r.code);
+    const firstName = asString(r.first_name);
+    const label = [code, firstName].filter(Boolean).join(" ").trim();
+    commercialByCoNo.set(n, label || String(n));
+  }
+
+  const rows: DashboardRow[] = [];
+  let latestDocMs = 0;
+
+  for (const line of lines) {
+    const docRaw = asString(line.doc_date);
+    const ym = docRaw ? parseDocYearMonth(docRaw) : null;
+    if (!ym) continue;
+
+    const t = asDate(docRaw)?.getTime() ?? 0;
+    if (t > latestDocMs) latestDocMs = t;
+
+    const productCode = asString(line.product_code);
+    const enrich = productByCode.get(productCode);
+    const familyCode = enrich?.familyCode ?? "N/A";
+    const familyLabel = enrich?.familyLabel ?? "N/A";
+    const brand = enrich?.brand ?? "Sans marque";
+    const article = enrich?.article ?? (productCode || "Article");
+
+    const quantity = Math.max(0, asNumber(line.quantity));
+    const totalHt = asNumber(line.total_ht);
+
+    const clientCt = asString(line.client_ct_num);
+    const clientName = clientCt ? (clientByCtNum.get(clientCt) ?? clientCt) : "Non renseigné";
+
+    const coRaw = line.commercial_co_no;
+    const coNo = typeof coRaw === "number" ? coRaw : coRaw != null ? Number(coRaw) : NaN;
+    const commercial =
+      Number.isFinite(coNo) ? (commercialByCoNo.get(coNo) ?? String(coNo)) : "Non renseigné";
+
+    const { city, region } = cityRegionForLine(article, brand, ym.monthIndex);
+
+    rows.push({
+      year: ym.year,
+      monthIndex: ym.monthIndex,
+      monthLabel: MONTHS_FR[ym.monthIndex] ?? "N/A",
+      clientName,
+      commercial,
+      familyCode,
+      familyLabel,
+      brand,
+      article,
+      quantity,
+      totalHt,
+      city,
+      region,
     });
-  });
+  }
 
-  const lastUpdated = products.length
-    ? new Date(
-      Math.max(
-        ...products
-          .map((p) => asDate(p.updated_at)?.getTime() ?? 0)
-          .filter((value) => value > 0),
-      ),
-    )
-    : new Date();
+  const productUpdatedMs = Math.max(
+    0,
+    ...products.map((p) => asDate(p.updated_at)?.getTime() ?? 0),
+  );
+  const lastUpdated =
+    latestDocMs > 0
+      ? new Date(Math.max(latestDocMs, productUpdatedMs))
+      : productUpdatedMs > 0
+        ? new Date(productUpdatedMs)
+        : new Date();
 
   return { rows, timestamp: Number.isNaN(lastUpdated.getTime()) ? new Date() : lastUpdated };
 }
@@ -290,6 +370,48 @@ export default function CommercialDashboard() {
     [tableRows],
   );
 
+  const rowsByMonthKey = useMemo(() => {
+    const m = new Map<string, DashboardRow[]>();
+    for (const r of tableRows) {
+      const k = `${r.year}|${r.monthIndex}`;
+      m.set(k, [...(m.get(k) ?? []), r]);
+    }
+    return m;
+  }, [tableRows]);
+
+  const monthSectionKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of tableRows) {
+      set.add(`${r.year}|${r.monthIndex}`);
+    }
+    return Array.from(set).sort((a, b) => {
+      const [ya, ma] = a.split("|").map(Number) as [number, number];
+      const [yb, mb] = b.split("|").map(Number) as [number, number];
+      if (ya !== yb) return yb - ya;
+      return ma - mb;
+    });
+  }, [tableRows]);
+
+  const regionRows = useMemo(() => {
+    const m = new Map<string, { region: string; city: string; quantity: number; totalHt: number }>();
+    for (const r of filteredRows) {
+      const key = [r.region, r.city].join(":::");
+      const cur = m.get(key);
+      if (cur) {
+        cur.quantity += r.quantity;
+        cur.totalHt += r.totalHt;
+      } else {
+        m.set(key, {
+          region: r.region,
+          city: r.city,
+          quantity: r.quantity,
+          totalHt: r.totalHt,
+        });
+      }
+    }
+    return Array.from(m.values()).sort((a, b) => b.totalHt - a.totalHt);
+  }, [filteredRows]);
+
   const handleExportPdf = async () => {
     if (!pdfRootRef.current || pdfExporting || loading || error) return;
     try {
@@ -377,119 +499,199 @@ export default function CommercialDashboard() {
             Aucune donnee disponible pour les filtres selectionnes.
           </div>
         ) : (
-          <section className="grid grid-cols-1 gap-3 px-3 py-3 lg:grid-cols-5">
-            <article className="rounded-md border border-slate-200 bg-white lg:col-span-3 dark:border-slate-600 dark:bg-slate-900">
-              <h2 className="border-b border-slate-200 px-3 py-2 text-xs font-bold tracking-wide text-slate-700 uppercase dark:border-slate-600 dark:text-slate-200">
-                DETAIL DES VENTES MENSUELLES PAR FAMILLE & MARQUE
-              </h2>
-              <div className="max-h-[430px] overflow-auto">
-                <table className="w-full border-collapse text-[11px]">
-                  <thead className="sticky top-0 bg-slate-100 text-[10px] font-bold tracking-wide text-[#4e78a3] uppercase dark:bg-slate-800 dark:text-sky-400">
-                    <tr>
-                      <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">ANNEE</th>
-                      <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">MOIS</th>
-                      <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">FAMILLE</th>
-                      <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">MARQUE</th>
-                      <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">ARTICLE</th>
-                      <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-600">QTE VENDUE</th>
-                      <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-600">TOTAL HT</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tableRows.map((row, index) => (
-                      <tr key={`${row.year}-${row.monthIndex}-${row.familyCode}-${row.brand}-${row.article}-${index}`} className={index % 2 === 0 ? "bg-white dark:bg-slate-900" : "bg-slate-50 dark:bg-slate-800/40"}>
-                        <td className="px-2 py-1">{row.year}</td>
-                        <td className="px-2 py-1">{row.monthLabel}</td>
-                        <td className="px-2 py-1">{row.familyLabel}</td>
-                        <td className="px-2 py-1">{row.brand}</td>
-                        <td className="max-w-[220px] truncate px-2 py-1 align-top" title={row.article}>
-                          {row.article}
-                        </td>
-                        <td className="px-2 py-1 text-right tabular-nums">{formatIntegerFr(row.quantity)}</td>
-                        <td className="px-2 py-1 text-right font-medium tabular-nums text-slate-900 dark:text-slate-100">
-                          {formatCurrencyTnd(row.totalHt)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-slate-100 text-[11px] font-bold dark:bg-slate-800">
-                    <tr>
-                      <td colSpan={5} className="border-t border-slate-200 px-2 py-1 dark:border-slate-600">
-                        Totals
-                      </td>
-                      <td className="border-t border-slate-200 px-2 py-1 text-right tabular-nums dark:border-slate-600">
-                        {formatIntegerFr(totals.quantity)}
-                      </td>
-                      <td className="border-t border-slate-200 px-2 py-1 text-right text-base tabular-nums text-[#1f4f7a] dark:border-slate-600 dark:text-sky-300">
-                        {formatCurrencyTnd(totals.totalHt)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </article>
+          <section className="px-3 py-3">
+            <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+              Un tableau par mois calendaire (uniquement les mois ayant des lignes de vente dans Sage) — détail par famille, marque et article.
+            </p>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="space-y-4 lg:col-span-2">
+                {monthSectionKeys.map((key) => {
+                  const [ys, ms] = key.split("|");
+                  const y = Number(ys);
+                  const monthIndex = Number(ms);
+                  const mRows = rowsByMonthKey.get(key) ?? [];
+                  const st = mRows.reduce(
+                    (a, r) => ({ q: a.q + r.quantity, ht: a.ht + r.totalHt }),
+                    { q: 0, ht: 0 },
+                  );
+                  return (
+                    <article
+                      key={key}
+                      className="overflow-hidden rounded-md border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-900"
+                    >
+                      <h2 className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold tracking-wide text-slate-800 uppercase dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-100">
+                        {MONTHS_FR[monthIndex] ?? "—"} {y} — Détail familles & marques
+                      </h2>
+                      <div className="max-h-[380px] overflow-auto">
+                        <table className="w-full min-w-[640px] border-collapse text-[11px]">
+                          <thead className="sticky top-0 bg-slate-100 text-[10px] font-bold tracking-wide text-[#4e78a3] uppercase dark:bg-slate-800 dark:text-sky-400">
+                            <tr>
+                              <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">FAMILLE</th>
+                              <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">MARQUE</th>
+                              <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">ARTICLE</th>
+                              <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">VILLE</th>
+                              <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">RÉGION</th>
+                              <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-600">QTE</th>
+                              <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-600">TOTAL HT</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {mRows.map((row, index) => (
+                              <tr
+                                key={`${row.year}-${row.monthIndex}-${row.familyCode}-${row.brand}-${row.article}-${row.city}-${index}`}
+                                className={index % 2 === 0 ? "bg-white dark:bg-slate-900" : "bg-slate-50 dark:bg-slate-800/40"}
+                              >
+                                <td className="px-2 py-1">{row.familyLabel}</td>
+                                <td className="px-2 py-1">{row.brand}</td>
+                                <td className="max-w-[200px] truncate px-2 py-1 align-top" title={row.article}>
+                                  {row.article}
+                                </td>
+                                <td className="px-2 py-1">{row.city}</td>
+                                <td className="px-2 py-1">{row.region}</td>
+                                <td className="px-2 py-1 text-right tabular-nums">{formatIntegerFr(row.quantity)}</td>
+                                <td className="px-2 py-1 text-right font-medium tabular-nums text-slate-900 dark:text-slate-100">
+                                  {formatCurrencyTnd(row.totalHt)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="bg-amber-50/90 text-[11px] font-semibold dark:bg-amber-950/40">
+                            <tr>
+                              <td colSpan={5} className="border-t border-slate-200 px-2 py-1 dark:border-slate-600">
+                                Sous-total {MONTHS_FR[monthIndex]} {y}
+                              </td>
+                              <td className="border-t border-slate-200 px-2 py-1 text-right tabular-nums dark:border-slate-600">
+                                {formatIntegerFr(st.q)}
+                              </td>
+                              <td className="border-t border-slate-200 px-2 py-1 text-right tabular-nums text-[#1f4f7a] dark:border-slate-600 dark:text-sky-300">
+                                {formatCurrencyTnd(st.ht)}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </article>
+                  );
+                })}
 
-            <article className="rounded-md border border-slate-200 bg-white lg:col-span-2 dark:border-slate-600 dark:bg-slate-900">
-              <h2 className="border-b border-slate-200 px-3 py-2 text-center text-xs font-bold tracking-wide text-slate-700 uppercase dark:border-slate-600 dark:text-slate-200">
-                REPARTITION DU CHIFFRE D&apos;AFFAIRES (CA HT) PAR MARQUE
-              </h2>
-              <div className="h-[430px] min-h-[280px] w-full min-w-0 px-2 py-3">
-                <ChartSizeGate className="h-full w-full">
-                  {({ width, height }) => (
-                    <ResponsiveContainer width={width} height={height}>
-                      <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
-                        <Pie
-                          data={pieData}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="42%"
-                          innerRadius={0}
-                          outerRadius={88}
-                          paddingAngle={pieData.length > 1 ? 1 : 0}
-                          label={false}
-                          stroke="#fff"
-                          strokeWidth={1}
-                        >
-                          {pieData.map((entry, index) => (
-                            <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={(value) =>
-                            formatCurrencyTnd(Number(Array.isArray(value) ? value[0] : (value ?? 0)))
-                          }
-                          labelFormatter={(name) => String(name)}
-                          contentStyle={tooltipContentStyle}
-                        />
-                        <Legend
-                          verticalAlign="bottom"
-                          align="center"
-                          iconType="circle"
-                          wrapperStyle={{
-                            fontSize: "11px",
-                            lineHeight: "16px",
-                            paddingTop: "4px",
-                          }}
-                          formatter={(value, entry) => {
-                            const raw = entry as { payload?: { value?: number } };
-                            const v = raw?.payload?.value ?? 0;
-                            const pct =
-                              pieTotal > 0
-                                ? new Intl.NumberFormat("fr-FR", {
+                <article className="overflow-hidden rounded-md border-2 border-[#5b8dbd]/30 bg-white dark:border-slate-600 dark:bg-slate-900">
+                  <h2 className="border-b border-slate-200 bg-slate-100 px-3 py-2 text-xs font-bold tracking-wide text-slate-800 uppercase dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
+                    Total général (filtre actif)
+                  </h2>
+                  <div className="overflow-x-auto p-2">
+                    <table className="w-full border-collapse text-[11px]">
+                      <tbody>
+                        <tr className="bg-slate-50 font-bold dark:bg-slate-800">
+                          <td className="px-2 py-2">Toutes périodes affichées</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{formatIntegerFr(totals.quantity)}</td>
+                          <td className="px-2 py-2 text-right text-base tabular-nums text-[#1f4f7a] dark:text-sky-300">
+                            {formatCurrencyTnd(totals.totalHt)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+
+                <article className="overflow-hidden rounded-md border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-900">
+                  <h2 className="border-b border-slate-200 px-3 py-2 text-xs font-bold tracking-wide text-slate-700 uppercase dark:border-slate-600 dark:text-slate-200">
+                    RAPPORT PAR VILLE / RÉGION (CA HT)
+                  </h2>
+                  <div className="max-h-[320px] overflow-auto">
+                    <table className="w-full min-w-[480px] border-collapse text-[11px]">
+                      <thead className="sticky top-0 bg-slate-100 text-[10px] font-bold uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                        <tr>
+                          <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">Région</th>
+                          <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">Ville</th>
+                          <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-600">Qté</th>
+                          <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-600">CA HT</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {regionRows.map((rr) => (
+                          <tr
+                            key={`${rr.region}-${rr.city}`}
+                            className="border-b border-slate-100 dark:border-slate-700/80"
+                          >
+                            <td className="px-2 py-1.5">{rr.region}</td>
+                            <td className="px-2 py-1.5">{rr.city}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{formatIntegerFr(rr.quantity)}</td>
+                            <td className="px-2 py-1.5 text-right font-medium tabular-nums">
+                              {formatCurrencyTnd(rr.totalHt)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="border-t border-slate-200 px-3 py-2 text-[10px] text-slate-500 dark:border-slate-600 dark:text-slate-400">
+                    Ville / région : répartition indicative (à remplacer par des champs `city` / `region` côté clients ou produits lorsqu’ils seront disponibles).
+                  </p>
+                </article>
+              </div>
+
+              <article className="h-fit rounded-md border border-slate-200 bg-white lg:sticky lg:top-2 dark:border-slate-600 dark:bg-slate-900">
+                <h2 className="border-b border-slate-200 px-3 py-2 text-center text-xs font-bold tracking-wide text-slate-700 uppercase dark:border-slate-600 dark:text-slate-200">
+                  RÉPARTITION CA HT PAR MARQUE
+                </h2>
+                <div className="h-[min(60vh,430px)] min-h-[280px] w-full min-w-0 px-2 py-3">
+                  <ChartSizeGate className="h-full w-full">
+                    {({ width, height }) => (
+                      <ResponsiveContainer width={width} height={height}>
+                        <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+                          <Pie
+                            data={pieData}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="42%"
+                            innerRadius={0}
+                            outerRadius={88}
+                            paddingAngle={pieData.length > 1 ? 1 : 0}
+                            label={false}
+                            stroke="#fff"
+                            strokeWidth={1}
+                          >
+                            {pieData.map((entry, index) => (
+                              <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(value) =>
+                              formatCurrencyTnd(Number(Array.isArray(value) ? value[0] : (value ?? 0)))
+                            }
+                            labelFormatter={(name) => String(name)}
+                            contentStyle={tooltipContentStyle}
+                          />
+                          <Legend
+                            verticalAlign="bottom"
+                            align="center"
+                            iconType="circle"
+                            wrapperStyle={{
+                              fontSize: "11px",
+                              lineHeight: "16px",
+                              paddingTop: "4px",
+                            }}
+                            formatter={(value, entry) => {
+                              const raw = entry as { payload?: { value?: number } };
+                              const v = raw?.payload?.value ?? 0;
+                              const pct =
+                                pieTotal > 0
+                                  ? new Intl.NumberFormat("fr-FR", {
                                     minimumFractionDigits: 1,
                                     maximumFractionDigits: 1,
                                   }).format((v / pieTotal) * 100)
-                                : "0,0";
-                            return `${String(value)} — ${formatCurrencyTnd(v)} (${pct}%)`;
-                          }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  )}
-                </ChartSizeGate>
-              </div>
-            </article>
+                                  : "0,0";
+                              return `${String(value)} — ${formatCurrencyTnd(v)} (${pct}%)`;
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    )}
+                  </ChartSizeGate>
+                </div>
+              </article>
+            </div>
           </section>
         )}
 

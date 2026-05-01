@@ -249,19 +249,53 @@ export default function PalmaresRevendeurs() {
         ) : (
           <>
             <div className="overflow-x-auto px-5 py-4">
-              <table className="min-w-[1450px] w-full border-collapse text-[11px]">
-                <thead className="bg-slate-100 text-[10px] font-bold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              <table className="min-w-[1200px] w-full border-collapse text-[10px]">
+                <thead className="bg-slate-100 text-[9px] font-bold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                   <tr>
-                    <th className="border border-slate-200 px-2 py-2 text-left dark:border-slate-600">Classement</th>
-                    <th className="border border-slate-200 px-2 py-2 text-left dark:border-slate-600">Revendeur</th>
-                    <th className="border border-slate-200 px-2 py-2 text-left dark:border-slate-600">
-                      Monthly Detail (Jan-Dec)
+                    <th
+                      className="sticky left-0 z-10 min-w-[36px] border border-slate-200 bg-slate-100 px-1 py-2 text-left dark:border-slate-600 dark:bg-slate-800"
+                      rowSpan={2}
+                    >
+                      N°
                     </th>
-                    <th className="border border-slate-200 px-2 py-2 text-right dark:border-slate-600">Total 2026</th>
-                    <th className="border border-slate-200 px-2 py-2 text-right dark:border-slate-600">% Evol vs 2025</th>
-                    <th className="border border-slate-200 px-2 py-2 text-right dark:border-slate-600">% Evol vs 2024</th>
-                    <th className="border border-slate-200 px-2 py-2 text-center dark:border-slate-600">Tendance</th>
-                    <th className="border border-slate-200 px-2 py-2 text-center dark:border-slate-600">Indicateur</th>
+                    <th
+                      className="sticky left-[2.2rem] z-10 min-w-[120px] max-w-[160px] border border-slate-200 bg-slate-100 px-1 py-2 text-left dark:border-slate-600 dark:bg-slate-800"
+                      rowSpan={2}
+                    >
+                      Revendeur
+                    </th>
+                    <th
+                      className="border border-slate-200 px-0 py-1 text-center text-[8px] dark:border-slate-600"
+                      colSpan={12}
+                    >
+                      Détail mensuel (CA) — toutes périodes visibles
+                    </th>
+                    <th className="border border-slate-200 px-1 py-2 text-right dark:border-slate-600" rowSpan={2}>
+                      Total {year}
+                    </th>
+                    <th className="border border-slate-200 px-1 py-2 text-right dark:border-slate-600" rowSpan={2}>
+                      % 2025
+                    </th>
+                    <th className="border border-slate-200 px-1 py-2 text-right dark:border-slate-600" rowSpan={2}>
+                      % 2024
+                    </th>
+                    <th className="border border-slate-200 px-0 py-2 text-center dark:border-slate-600" rowSpan={2}>
+                      Courbe
+                    </th>
+                    <th className="border border-slate-200 px-0 py-2 text-center dark:border-slate-600" rowSpan={2}>
+                      Indic.
+                    </th>
+                  </tr>
+                  <tr>
+                    {MONTHS.map((m) => (
+                      <th
+                        key={m}
+                        className="min-w-[56px] border border-slate-200 px-0.5 py-1 text-right font-bold normal-case text-slate-600 dark:border-slate-600 dark:text-slate-300"
+                        title={m}
+                      >
+                        {m}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -277,14 +311,24 @@ export default function PalmaresRevendeurs() {
 
                     return (
                       <tr key={row.reseller} className={idx % 2 === 0 ? "bg-white dark:bg-slate-900" : "bg-slate-50 dark:bg-slate-800/40"}>
-                        <td className="border border-slate-200 px-2 py-1.5 dark:border-slate-600">{row.rank}</td>
-                        <td className="border border-slate-200 px-2 py-1.5 font-medium dark:border-slate-600">
+                        <td className="sticky left-0 z-[1] border border-slate-200 bg-inherit px-1 py-1.5 text-center dark:border-slate-600">
+                          {row.rank}
+                        </td>
+                        <td
+                          className="sticky left-[2.2rem] z-[1] max-w-[160px] border border-slate-200 bg-inherit py-1.5 pl-1 pr-2 text-[10px] font-medium leading-tight dark:border-slate-600"
+                          title={row.reseller}
+                        >
                           {row.reseller}
                         </td>
-                        <td className="border border-slate-200 px-2 py-1.5 text-[10px] dark:border-slate-600">
-                          {row.monthly.map((m, mIdx) => `${MONTHS[mIdx]}:${formatCurrencyTnd(m, 0)}`).join(" | ")}
-                        </td>
-                        <td className="border border-slate-200 px-2 py-1.5 text-right dark:border-slate-600">
+                        {row.monthly.map((m, mIdx) => (
+                          <td
+                            key={mIdx}
+                            className="whitespace-nowrap border border-slate-200 py-1.5 pr-1 text-right tabular-nums text-[9px] text-slate-800 dark:border-slate-600 dark:text-slate-200"
+                          >
+                            {formatCurrencyTnd(m, 0)}
+                          </td>
+                        ))}
+                        <td className="border border-slate-200 px-1 py-1.5 text-right tabular-nums dark:border-slate-600">
                           {formatCurrencyTnd(row.total2026, 0)}
                         </td>
                         <td className={`border border-slate-200 px-2 py-1.5 text-right dark:border-slate-600 ${row.evolVs2025 >= 0 ? "text-emerald-600" : "text-red-500"}`}>
@@ -318,12 +362,20 @@ export default function PalmaresRevendeurs() {
                     );
                   })}
                   <tr className="bg-slate-100 font-semibold dark:bg-slate-800">
-                    <td className="border border-slate-300 px-2 py-2 dark:border-slate-600" colSpan={2}>
+                    <td
+                      className="sticky left-0 z-[1] border border-slate-300 bg-slate-100 px-1 py-2 text-center dark:border-slate-600 dark:bg-slate-800"
+                      colSpan={2}
+                    >
                       TOTAL GLOBAL
                     </td>
-                    <td className="border border-slate-300 px-2 py-2 text-[10px] dark:border-slate-600">
-                      {totals.monthly.map((m, i) => `${MONTHS[i]}:${formatCurrencyTnd(m, 0)}`).join(" | ")}
-                    </td>
+                    {totals.monthly.map((m, i) => (
+                      <td
+                        key={MONTHS[i]}
+                        className="border border-slate-300 py-2 pr-1 text-right text-[9px] tabular-nums dark:border-slate-600"
+                      >
+                        {formatCurrencyTnd(m, 0)}
+                      </td>
+                    ))}
                     <td className="border border-slate-300 px-2 py-2 text-right dark:border-slate-600">
                       {formatCurrencyTnd(totals.y2026, 0)}
                     </td>

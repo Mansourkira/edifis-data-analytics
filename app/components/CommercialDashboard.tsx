@@ -5,6 +5,7 @@ import { Download, Loader2, Printer, RefreshCw, Search } from "lucide-react";
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatCurrencyTnd } from "../lib/format-currency";
+import { parseSupabaseNumeric } from "../lib/parse-numeric";
 import { createBrowserSupabaseClient } from "../lib/supabase/client";
 import ChartSizeGate from "./ChartSizeGate";
 import { exportElementToPdf, waitForPdfDomStable } from "../lib/export-pdf";
@@ -16,6 +17,7 @@ type DashboardRow = {
   monthLabel: string;
   clientName: string;
   commercial: string;
+  productCode: string;
   familyCode: string;
   familyLabel: string;
   brand: string;
@@ -33,10 +35,12 @@ type DashboardPayload = {
 
 type Filters = {
   client: string;
+  clientNameSearch: string;
   commercial: string;
   year: string;
   family: string;
   brand: string;
+  articleRef: string;
   search: string;
 };
 
@@ -84,12 +88,6 @@ function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
-function asNumber(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function asDate(value: unknown): Date | null {
   if (typeof value !== "string" || !value) return null;
   const date = new Date(value);
@@ -106,13 +104,13 @@ function parseDocYearMonth(docDate: string): { year: number; monthIndex: number 
   return { year, monthIndex: month - 1 };
 }
 
-async function fetchAllSalesLines(supabase: SupabaseClient): Promise<Record<string, unknown>[]> {
+async function fetchAllSageDocLignes(supabase: SupabaseClient): Promise<Record<string, unknown>[]> {
   const pageSize = 1000;
   let offset = 0;
   const all: Record<string, unknown>[] = [];
   for (; ;) {
     const { data, error } = await supabase
-      .from("sales_lines")
+      .from("sage_doc_lignes")
       .select("doc_date, product_code, client_ct_num, commercial_co_no, quantity, total_ht")
       .order("doc_date", { ascending: true })
       .range(offset, offset + pageSize - 1);
@@ -135,7 +133,7 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
   const supabase = createBrowserSupabaseClient();
 
   const [lines, productsResult, familiesResult, clientsResult, commercialsResult] = await Promise.all([
-    fetchAllSalesLines(supabase),
+    fetchAllSageDocLignes(supabase),
     supabase.from("products").select("*"),
     supabase.from("families").select("*"),
     supabase.from("clients").select("ct_num, name"),
@@ -162,7 +160,7 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
 
   const productByCode = new Map<
     string,
-    { familyCode: string; familyLabel: string; brand: string; article: string }
+    { familyCode: string; familyLabel: string; brand: string; article: string; unitPriceHt: number }
   >();
   for (const product of products) {
     const code = asString(product.code ?? product.product_code);
@@ -174,7 +172,10 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
       product.name ?? product.product_name ?? product.article ?? product.designation,
       code,
     );
-    productByCode.set(code, { familyCode, familyLabel, brand, article });
+    const unitPriceHt = parseSupabaseNumeric(
+      product.price_ht ?? product.price ?? product.prix_ht ?? product.prix ?? product.unit_price_ht,
+    );
+    productByCode.set(code, { familyCode, familyLabel, brand, article, unitPriceHt });
   }
 
   const clientByCtNum = new Map<string, string>();
@@ -215,8 +216,11 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
     const brand = enrich?.brand ?? "Sans marque";
     const article = enrich?.article ?? (productCode || "Article");
 
-    const quantity = Math.max(0, asNumber(line.quantity));
-    const totalHt = asNumber(line.total_ht);
+    const quantity = Math.max(0, parseSupabaseNumeric(line.quantity));
+    let totalHt = parseSupabaseNumeric(line.total_ht);
+    if (totalHt === 0 && quantity > 0 && enrich && enrich.unitPriceHt > 0) {
+      totalHt = quantity * enrich.unitPriceHt;
+    }
 
     const clientCt = asString(line.client_ct_num);
     const clientName = clientCt ? (clientByCtNum.get(clientCt) ?? clientCt) : "Non renseigné";
@@ -234,6 +238,7 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
       monthLabel: MONTHS_FR[ym.monthIndex] ?? "N/A",
       clientName,
       commercial,
+      productCode,
       familyCode,
       familyLabel,
       brand,
@@ -271,10 +276,12 @@ export default function CommercialDashboard() {
 
   const [filters, setFilters] = useState<Filters>({
     client: "",
+    clientNameSearch: "",
     commercial: "",
     year: "",
     family: "",
     brand: "",
+    articleRef: "",
     search: "",
   });
 
@@ -298,35 +305,50 @@ export default function CommercialDashboard() {
 
   const options = useMemo(() => {
     const uniq = (values: string[]) => Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+    const allClients = uniq(rows.map((r) => r.clientName));
+    const q = filters.clientNameSearch.trim().toLowerCase();
+    let clientsFiltered = q ? allClients.filter((name) => name.toLowerCase().includes(q)) : allClients;
+    if (filters.client && !clientsFiltered.includes(filters.client)) {
+      clientsFiltered = [filters.client, ...clientsFiltered];
+    }
     return {
-      clients: uniq(rows.map((r) => r.clientName)),
+      clients: clientsFiltered,
       commercials: uniq(rows.map((r) => r.commercial)),
       years: uniq(rows.map((r) => String(r.year))),
       families: uniq(rows.map((r) => r.familyLabel)),
       brands: uniq(rows.map((r) => r.brand)),
     };
-  }, [rows]);
+  }, [rows, filters.clientNameSearch, filters.client]);
 
   const filteredRows = useMemo(() => {
     const normalizedSearch = filters.search.trim().toLowerCase();
+    const refQ = filters.articleRef.trim().toLowerCase();
     return rows.filter((row) => {
       if (filters.client && row.clientName !== filters.client) return false;
       if (filters.commercial && row.commercial !== filters.commercial) return false;
       if (filters.year && String(row.year) !== filters.year) return false;
       if (filters.family && row.familyLabel !== filters.family) return false;
       if (filters.brand && row.brand !== filters.brand) return false;
+      if (refQ && !row.productCode.toLowerCase().includes(refQ)) return false;
       if (!normalizedSearch) return true;
-      return [row.clientName, row.commercial, row.familyLabel, row.brand, row.article]
+      const haystack = [
+        row.clientName,
+        row.commercial,
+        row.familyLabel,
+        row.brand,
+        row.article,
+        row.productCode,
+      ]
         .join(" ")
-        .toLowerCase()
-        .includes(normalizedSearch);
+        .toLowerCase();
+      return haystack.includes(normalizedSearch);
     });
   }, [rows, filters]);
 
   const tableRows = useMemo(() => {
     const grouped = new Map<string, DashboardRow>();
     for (const row of filteredRows) {
-      const key = `${row.year}|${row.monthIndex}|${row.familyLabel}|${row.brand}|${row.article}`;
+      const key = `${row.year}|${row.monthIndex}|${row.familyLabel}|${row.brand}|${row.productCode}|${row.article}`;
       const current = grouped.get(key);
       if (current) {
         current.quantity += row.quantity;
@@ -445,16 +467,47 @@ export default function CommercialDashboard() {
 
         <section className="relative border-b border-slate-200 bg-slate-100 px-4 py-3 dark:border-slate-600 dark:bg-slate-800/80">
           <div className="mb-2 flex flex-wrap items-end gap-3 pr-40">
-            <FilterSelect label="Nom du Client" value={filters.client} options={options.clients} onChange={(value) => setFilters((prev) => ({ ...prev, client: value }))} />
+            <div className="min-w-48 flex-1">
+              <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                Filtrer clients (nom)
+              </label>
+              <div className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-2 dark:border-slate-600 dark:bg-slate-900">
+                <Search size={14} className="shrink-0 text-slate-500 dark:text-slate-400" />
+                <input
+                  value={filters.clientNameSearch}
+                  onChange={(event) => setFilters((prev) => ({ ...prev, clientNameSearch: event.target.value }))}
+                  placeholder="Tapez pour réduire la liste…"
+                  className="h-8 w-full min-w-0 bg-transparent text-xs text-slate-700 outline-none dark:text-slate-200"
+                />
+              </div>
+            </div>
+            <FilterSelect
+              label="Nom du Client"
+              value={filters.client}
+              options={options.clients}
+              onChange={(value) => setFilters((prev) => ({ ...prev, client: value }))}
+            />
             <FilterSelect label="Commercial" value={filters.commercial} options={options.commercials} onChange={(value) => setFilters((prev) => ({ ...prev, commercial: value }))} />
+            <div className="min-w-44 flex-1">
+              <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Référence article</label>
+              <div className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-2 dark:border-slate-600 dark:bg-slate-900">
+                <Search size={14} className="shrink-0 text-slate-500 dark:text-slate-400" />
+                <input
+                  value={filters.articleRef}
+                  onChange={(event) => setFilters((prev) => ({ ...prev, articleRef: event.target.value }))}
+                  placeholder="Ex. TAG.116096"
+                  className="h-8 w-full min-w-0 bg-transparent text-xs text-slate-700 outline-none dark:text-slate-200"
+                />
+              </div>
+            </div>
             <div className="min-w-56 flex-1">
-              <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Search</label>
+              <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Recherche libre</label>
               <div className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-2 dark:border-slate-600 dark:bg-slate-900">
                 <Search size={14} className="text-slate-500 dark:text-slate-400" />
                 <input
                   value={filters.search}
                   onChange={(event) => setFilters((prev) => ({ ...prev, search: event.target.value }))}
-                  placeholder="Search"
+                  placeholder="Marque, famille, article…"
                   className="h-8 w-full bg-transparent text-xs text-slate-700 outline-none dark:text-slate-200"
                 />
               </div>
@@ -526,6 +579,7 @@ export default function CommercialDashboard() {
                         <table className="w-full min-w-[640px] border-collapse text-[11px]">
                           <thead className="sticky top-0 bg-slate-100 text-[10px] font-bold tracking-wide text-[#4e78a3] uppercase dark:bg-slate-800 dark:text-sky-400">
                             <tr>
+                              <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">RÉF.</th>
                               <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">FAMILLE</th>
                               <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">MARQUE</th>
                               <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">ARTICLE</th>
@@ -538,9 +592,12 @@ export default function CommercialDashboard() {
                           <tbody>
                             {mRows.map((row, index) => (
                               <tr
-                                key={`${row.year}-${row.monthIndex}-${row.familyCode}-${row.brand}-${row.article}-${row.city}-${index}`}
+                                key={`${row.year}-${row.monthIndex}-${row.productCode}-${row.familyCode}-${row.brand}-${row.article}-${row.city}-${index}`}
                                 className={index % 2 === 0 ? "bg-white dark:bg-slate-900" : "bg-slate-50 dark:bg-slate-800/40"}
                               >
+                                <td className="max-w-[120px] truncate px-2 py-1 align-top font-mono text-[10px]" title={row.productCode}>
+                                  {row.productCode}
+                                </td>
                                 <td className="px-2 py-1">{row.familyLabel}</td>
                                 <td className="px-2 py-1">{row.brand}</td>
                                 <td className="max-w-[200px] truncate px-2 py-1 align-top" title={row.article}>
@@ -557,7 +614,7 @@ export default function CommercialDashboard() {
                           </tbody>
                           <tfoot className="bg-amber-50/90 text-[11px] font-semibold dark:bg-amber-950/40">
                             <tr>
-                              <td colSpan={5} className="border-t border-slate-200 px-2 py-1 dark:border-slate-600">
+                              <td colSpan={6} className="border-t border-slate-200 px-2 py-1 dark:border-slate-600">
                                 Sous-total {MONTHS_FR[monthIndex]} {y}
                               </td>
                               <td className="border-t border-slate-200 px-2 py-1 text-right tabular-nums dark:border-slate-600">

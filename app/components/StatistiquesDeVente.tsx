@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { formatCurrencyTnd } from "../lib/format-currency";
+import { parseSupabaseNumeric } from "../lib/parse-numeric";
 import { createBrowserSupabaseClient } from "../lib/supabase/client";
 import { exportElementToPdf, waitForPdfDomStable } from "../lib/export-pdf";
 import ChartSizeGate from "./ChartSizeGate";
@@ -35,12 +36,6 @@ type MonthlyAgg = { monthStart: string; year: number; month: number; quantity: n
 
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
-}
-
-function asNumber(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function formatNumber(value: number): string {
@@ -73,8 +68,8 @@ function normalizeMonthlyRows(rows: SalesMonthlyRaw[]): MonthlyAgg[] {
     const year = parts[0];
     const month = parts[1];
     if (month < 1 || month > 12) continue;
-    const quantity = asNumber(r.qty_sold ?? r.quantity_sold ?? r.quantity ?? r.qte_vendue);
-    const totalHt = asNumber(r.total_ht ?? r.totalHt ?? r.amount_ht);
+    const quantity = parseSupabaseNumeric(r.qty_sold ?? r.quantity_sold ?? r.quantity ?? r.qte_vendue);
+    const totalHt = parseSupabaseNumeric(r.total_ht ?? r.totalHt ?? r.amount_ht);
 
     const key = `${year}|${month}`;
     const cur = map.get(key);
@@ -176,6 +171,31 @@ export default function StatistiquesDeVente() {
   });
 
   const [monthlyData, setMonthlyData] = useState<MonthlyAgg[]>([]);
+  const [clientSearch, setClientSearch] = useState("");
+  const [productSearch, setProductSearch] = useState("");
+
+  const visibleClients = useMemo(() => {
+    const q = clientSearch.trim().toLowerCase();
+    let list = q
+      ? clientOptions.filter(
+          (c) => c.name.toLowerCase().includes(q) || c.ctNum.toLowerCase().includes(q),
+        )
+      : clientOptions;
+    const sel = filters.selectedClientCtNum;
+    if (sel && !list.some((c) => c.ctNum === sel)) {
+      const found = clientOptions.find((c) => c.ctNum === sel);
+      if (found) list = [found, ...list];
+    }
+    return list;
+  }, [clientOptions, clientSearch, filters.selectedClientCtNum]);
+
+  const visibleProducts = useMemo(() => {
+    const q = productSearch.trim().toLowerCase();
+    if (!q) return productOptions;
+    return productOptions.filter(
+      (p) => p.code.toLowerCase().includes(q) || p.label.toLowerCase().includes(q),
+    );
+  }, [productOptions, productSearch]);
 
   useEffect(() => {
     let active = true;
@@ -321,7 +341,19 @@ export default function StatistiquesDeVente() {
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <div>
+          <div className="md:col-span-2 xl:col-span-2">
+            <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Rechercher un client (nom ou code)
+            </label>
+            <input
+              type="search"
+              value={clientSearch}
+              onChange={(e) => setClientSearch(e.target.value)}
+              placeholder="Tapez pour filtrer la liste des clients…"
+              className="h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200"
+            />
+          </div>
+          <div className="md:col-span-2 xl:col-span-2">
             <label className="mb-1 block text-xs font-semibold text-slate-600 dark:text-slate-300">Client</label>
             <select
               value={filters.selectedClientCtNum}
@@ -329,9 +361,9 @@ export default function StatistiquesDeVente() {
               className="h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200"
             >
               <option value="">Tous les clients</option>
-              {clientOptions.map((c) => (
+              {visibleClients.map((c) => (
                 <option key={c.ctNum} value={c.ctNum}>
-                  {c.name}
+                  {c.name} ({c.ctNum})
                 </option>
               ))}
             </select>
@@ -375,6 +407,13 @@ export default function StatistiquesDeVente() {
           <p className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
             Références produit (multi-sélection par code)
           </p>
+          <input
+            type="search"
+            value={productSearch}
+            onChange={(e) => setProductSearch(e.target.value)}
+            placeholder="Filtrer par référence article ou libellé…"
+            className="mb-2 h-9 w-full max-w-xl rounded border border-slate-300 bg-white px-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200"
+          />
           <div className="flex max-h-28 flex-wrap gap-2 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 dark:border-slate-600 dark:bg-slate-800/60">
             <button
               type="button"
@@ -386,7 +425,7 @@ export default function StatistiquesDeVente() {
             >
               Toutes
             </button>
-            {productOptions.map((p) => {
+            {visibleProducts.map((p) => {
               const selected = filters.selectedProductCodes.includes(p.code);
               return (
                 <button
@@ -411,6 +450,9 @@ export default function StatistiquesDeVente() {
               );
             })}
           </div>
+          {productSearch.trim() && visibleProducts.length === 0 ? (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">Aucune référence ne correspond à la recherche.</p>
+          ) : null}
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
             Commercial sélectionné: {selectedCommercialName || "Tous"} | Références:{" "}
             {filters.selectedProductCodes.length || "Toutes"}

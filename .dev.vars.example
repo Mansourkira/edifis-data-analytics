@@ -1,0 +1,14 @@
+# Local Workers preview (`npm run preview`) — copy to .dev.vars
+# https://developers.cloudflare.com/workers/testing/local-development/#local-only-environment-variables
+
+NEXTJS_ENV=development
+
+# Inlined into the client bundle at build time (also set in Cloudflare Build variables)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+
+# Optional app gate (client)
+NEXT_PUBLIC_APP_PASSWORD=
+
+# Server-only (API routes) — never expose to the browser
+# SUPABASE_SERVICE_ROLE_KEY=

@@ -1,10 +1,11 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "main": ".open-next/worker.js",
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "edifis-data-analytics",
+  "main": ".open-next/worker.js",
   "compatibility_date": "2026-05-15",
   "compatibility_flags": [
-    "nodejs_compat"
+    "nodejs_compat",
+    "global_fetch_strictly_public"
   ],
   "assets": {
     "directory": ".open-next/assets",
@@ -21,5 +22,26 @@
   },
   "observability": {
     "enabled": true
+  },
+  "env": {
+    "production": {
+      "name": "edifis-data-analytics",
+      "services": [
+        {
+          "binding": "WORKER_SELF_REFERENCE",
+          "service": "edifis-data-analytics"
+        }
+      ]
+    },
+    "preview": {
+      "name": "edifis-data-analytics-preview",
+      "workers_dev": true,
+      "services": [
+        {
+          "binding": "WORKER_SELF_REFERENCE",
+          "service": "edifis-data-analytics-preview"
+        }
+      ]
+    }
   }
 }

@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Edifis Data Analytics
 
-## Getting Started
+Next.js reporting app (Supabase / Sage sales data), deployed on **Cloudflare Workers** via [@opennextjs/cloudflare](https://opennext.js.org/cloudflare).
 
-First, run the development server:
+## Local development
 
 ```bash
+cp .env.example .env
+# fill NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, etc.
+
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Preview in the Workers runtime (closer to production)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cp .dev.vars.example .dev.vars
+# same NEXT_PUBLIC_* values as .env
 
-## Learn More
+npm run preview
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Cloudflare (Workers & Pages)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+This app is **not** a static export. It runs as a **Worker** with static assets (`.open-next/worker.js` + `.open-next/assets`).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| File | Role |
+|------|------|
+| `wrangler.jsonc` | Worker name, `nodejs_compat`, assets binding, production / preview envs |
+| `open-next.config.ts` | OpenNext Cloudflare adapter |
+| `public/_headers` | Long-cache headers for `/_next/static/*` |
 
-## Deploy on Vercel
+### Deploy from your machine
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm run deploy              # production Worker
+npm run deploy:preview      # preview env (workers.dev)
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Requires [Wrangler](https://developers.cloudflare.com/workers/wrangler/) login (`npx wrangler login`) or `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`.
+
+### Cloudflare dashboard (Workers Builds / Pages connected to Git)
+
+1. **Workers & Pages** → Create / connect project → link this repository.
+2. **Build command:** `npm run deploy`  
+   Or split: **Build** `npm run cf:build` only if your pipeline runs deploy separately (OpenNext recommends `npm run deploy` end-to-end).
+3. **Build variables and secrets** (required for the client bundle):
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_APP_PASSWORD` (optional)
+4. **Secrets** (optional, server-only): `SUPABASE_SERVICE_ROLE_KEY`
+5. Node.js **22** (see `.nvmrc`).
+
+Do **not** set “Build output directory” to `.next` or `out` — Wrangler uses `.open-next` via `wrangler.jsonc`.
+
+### GitHub Actions
+
+Workflow: [`.github/workflows/cloudflare-deploy.yml`](.github/workflows/cloudflare-deploy.yml)
+
+Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`  
+Variables: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, …
+
+### Types for bindings
+
+```bash
+npm run cf-typegen
+```
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm run dev` | Next.js dev server |
+| `npm run build` | `next build` only |
+| `npm run cf:build` | Next build + OpenNext Cloudflare bundle → `.open-next/` |
+| `npm run preview` | Build + `wrangler dev` |
+| `npm run deploy` | Build + deploy production Worker |
+| `npm run deploy:preview` | Build + deploy preview Worker |
+| `npm run lint` | ESLint |

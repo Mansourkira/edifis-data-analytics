@@ -6,6 +6,7 @@ import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip } fr
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatCurrencyTnd } from "../lib/format-currency";
 import { parseSupabaseNumeric } from "../lib/parse-numeric";
+import { resellerClientsQuery } from "../lib/clients";
 import { createBrowserSupabaseClient } from "../lib/supabase/client";
 import { exportElementToPdf, waitForPdfDomStable } from "../lib/export-pdf";
 import ChartSizeGate from "./ChartSizeGate";
@@ -47,7 +48,7 @@ async function fetchCatalog() {
   const supabase = createBrowserSupabaseClient();
   const [productsRes, clientsRes] = await Promise.all([
     supabase.from("products").select("*"),
-    supabase.from("clients").select("ct_num, name"),
+    resellerClientsQuery(supabase),
   ]);
   if (productsRes.error) throw productsRes.error;
   if (clientsRes.error) throw clientsRes.error;
@@ -134,6 +135,7 @@ function buildResellerRows(
     if (mo < 1 || mo > 12) continue;
 
     const ct = asString(line.client_ct_num);
+    if (ct && !clientByCt.has(ct)) continue;
     const key = ct || "__none__";
     const name = ct ? (clientByCt.get(ct) ?? ct) : "Client non renseigné";
 

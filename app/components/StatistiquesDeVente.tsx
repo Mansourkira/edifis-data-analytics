@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { formatCurrencyTnd } from "../lib/format-currency";
 import { parseSupabaseNumeric } from "../lib/parse-numeric";
+import { resellerClientsQuery } from "../lib/clients";
 import { createBrowserSupabaseClient } from "../lib/supabase/client";
 import { exportElementToPdf, waitForPdfDomStable } from "../lib/export-pdf";
 import ChartSizeGate from "./ChartSizeGate";
@@ -87,7 +88,7 @@ async function fetchFilterOptions() {
   const supabase = createBrowserSupabaseClient();
   const [productsRes, clientsRes, commercialsRes] = await Promise.all([
     supabase.from("products").select("code, name").order("name", { ascending: true }),
-    supabase.from("clients").select("ct_num, name").order("name", { ascending: true }),
+    resellerClientsQuery(supabase).order("name", { ascending: true }),
     supabase.from("commercials").select("co_no, code, first_name").order("co_no", { ascending: true }),
   ]);
 

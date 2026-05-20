@@ -6,6 +6,7 @@ import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recha
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatCurrencyTnd } from "../lib/format-currency";
 import { parseSupabaseNumeric } from "../lib/parse-numeric";
+import { resellerClientsQuery } from "../lib/clients";
 import { createBrowserSupabaseClient } from "../lib/supabase/client";
 import ChartSizeGate from "./ChartSizeGate";
 import { exportElementToPdf, waitForPdfDomStable } from "../lib/export-pdf";
@@ -16,6 +17,7 @@ type DashboardRow = {
   monthIndex: number;
   monthLabel: string;
   clientName: string;
+  clientCtNum: string;
   commercial: string;
   productCode: string;
   familyCode: string;
@@ -31,6 +33,8 @@ type DashboardRow = {
 type DashboardPayload = {
   rows: DashboardRow[];
   timestamp: Date;
+  /** `clients.ct_num` with `ct_type = 0` (revendeurs). */
+  resellerClientCtNums: string[];
 };
 
 type Filters = {
@@ -136,7 +140,7 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
     fetchAllSageDocLignes(supabase),
     supabase.from("products").select("*"),
     supabase.from("families").select("*"),
-    supabase.from("clients").select("ct_num, name"),
+    resellerClientsQuery(supabase),
     supabase.from("commercials").select("co_no, code, first_name"),
   ]);
 
@@ -237,6 +241,7 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
       monthIndex: ym.monthIndex,
       monthLabel: MONTHS_FR[ym.monthIndex] ?? "N/A",
       clientName,
+      clientCtNum: clientCt,
       commercial,
       productCode,
       familyCode,
@@ -261,7 +266,11 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
         ? new Date(productUpdatedMs)
         : new Date();
 
-  return { rows, timestamp: Number.isNaN(lastUpdated.getTime()) ? new Date() : lastUpdated };
+  return {
+    rows,
+    timestamp: Number.isNaN(lastUpdated.getTime()) ? new Date() : lastUpdated,
+    resellerClientCtNums: Array.from(clientByCtNum.keys()),
+  };
 }
 
 export default function CommercialDashboard() {
@@ -269,6 +278,7 @@ export default function CommercialDashboard() {
   const pdfRootRef = useRef<HTMLDivElement>(null);
   const [pdfExporting, setPdfExporting] = useState(false);
   const [rows, setRows] = useState<DashboardRow[]>([]);
+  const [resellerClientCtNums, setResellerClientCtNums] = useState<string[]>([]);
   /** null until data loads — avoids SSR/client `new Date()` hydration mismatch in the footer */
   const [timestamp, setTimestamp] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
@@ -291,6 +301,7 @@ export default function CommercialDashboard() {
       setError(null);
       const payload = await fetchDashboardData();
       setRows(payload.rows);
+      setResellerClientCtNums(payload.resellerClientCtNums);
       setTimestamp(payload.timestamp);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur de chargement");
@@ -303,9 +314,15 @@ export default function CommercialDashboard() {
     void loadDashboard();
   }, []);
 
+  const resellerCtSet = useMemo(() => new Set(resellerClientCtNums), [resellerClientCtNums]);
+
   const options = useMemo(() => {
     const uniq = (values: string[]) => Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
-    const allClients = uniq(rows.map((r) => r.clientName));
+    const allClients = uniq(
+      rows
+        .filter((r) => !r.clientCtNum || resellerCtSet.has(r.clientCtNum))
+        .map((r) => r.clientName),
+    );
     const q = filters.clientNameSearch.trim().toLowerCase();
     let clientsFiltered = q ? allClients.filter((name) => name.toLowerCase().includes(q)) : allClients;
     if (filters.client && !clientsFiltered.includes(filters.client)) {
@@ -318,7 +335,7 @@ export default function CommercialDashboard() {
       families: uniq(rows.map((r) => r.familyLabel)),
       brands: uniq(rows.map((r) => r.brand)),
     };
-  }, [rows, filters.clientNameSearch, filters.client]);
+  }, [rows, resellerCtSet, filters.clientNameSearch, filters.client]);
 
   const filteredRows = useMemo(() => {
     const normalizedSearch = filters.search.trim().toLowerCase();

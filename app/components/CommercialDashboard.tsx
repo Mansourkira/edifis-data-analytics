@@ -232,8 +232,8 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
 
     const coRaw = line.commercial_co_no;
     const coNo = typeof coRaw === "number" ? coRaw : coRaw != null ? Number(coRaw) : NaN;
-    const commercial =
-      Number.isFinite(coNo) ? (commercialByCoNo.get(coNo) ?? String(coNo)) : "Non renseigné";
+    if (Number.isFinite(coNo) && !commercialByCoNo.has(coNo)) continue;
+    const commercial = Number.isFinite(coNo) ? (commercialByCoNo.get(coNo) ?? "Non renseigné") : "Non renseigné";
 
     const { city, region } = cityRegionForLine(article, brand, ym.monthIndex);
 
@@ -776,13 +776,6 @@ export default function CommercialDashboard() {
           </p>
           <div data-pdf-ignore className="flex flex-wrap items-center gap-2">
             <ActionButton icon={Download} label="Exporter Excel" />
-            <ActionButton
-              icon={Printer}
-              label={pdfExporting ? "PDF..." : "Imprimer PDF"}
-              onClick={handleExportPdf}
-              disabled={pdfExporting || loading || !!error}
-            />
-            <ActionButton icon={RefreshCw} label="Rafraîchir" onClick={loadDashboard} />
           </div>
         </footer>
       </div>

@@ -26,8 +26,6 @@ type DashboardRow = {
   article: string;
   quantity: number;
   totalHt: number;
-  city: string;
-  region: string;
 };
 
 type DashboardPayload = {
@@ -65,28 +63,6 @@ const MONTHS_FR = [
 
 const PIE_COLORS = ["#3f7fc3", "#f5a24a", "#79c18d", "#e7c15a", "#b6b9c0", "#8c9ccb"];
 
-/** Gouvernorats + ville principale (données dérivées / démo — à lier à la base si colonnes dispo) */
-const TUNISIA_LOCATIONS: { city: string; region: string }[] = [
-  { city: "Tunis", region: "Tunis" },
-  { city: "Ariana", region: "Ariana" },
-  { city: "Ben Arous", region: "Ben Arous" },
-  { city: "Sfax", region: "Sfax" },
-  { city: "Sousse", region: "Sousse" },
-  { city: "Kairouan", region: "Kairouan" },
-  { city: "Bizerte", region: "Bizerte" },
-  { city: "Gabès", region: "Gabès" },
-  { city: "Gafsa", region: "Gafsa" },
-  { city: "Monastir", region: "Monastir" },
-  { city: "Nabeul", region: "Nabeul" },
-  { city: "Jendouba", region: "Jendouba" },
-];
-
-function cityRegionForLine(article: string, brand: string, monthIndex: number): { city: string; region: string } {
-  const h = article.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-  const b = brand.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-  const i = Math.abs(h + b * 7 + monthIndex * 13) % TUNISIA_LOCATIONS.length;
-  return TUNISIA_LOCATIONS[i]!;
-}
 
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -235,8 +211,6 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
     if (Number.isFinite(coNo) && !commercialByCoNo.has(coNo)) continue;
     const commercial = Number.isFinite(coNo) ? (commercialByCoNo.get(coNo) ?? "Non renseigné") : "Non renseigné";
 
-    const { city, region } = cityRegionForLine(article, brand, ym.monthIndex);
-
     rows.push({
       year: ym.year,
       monthIndex: ym.monthIndex,
@@ -251,8 +225,6 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
       article,
       quantity,
       totalHt,
-      city,
-      region,
     });
   }
 
@@ -432,26 +404,6 @@ export default function CommercialDashboard() {
     });
   }, [tableRows]);
 
-  const regionRows = useMemo(() => {
-    const m = new Map<string, { region: string; city: string; quantity: number; totalHt: number }>();
-    for (const r of filteredRows) {
-      const key = [r.region, r.city].join(":::");
-      const cur = m.get(key);
-      if (cur) {
-        cur.quantity += r.quantity;
-        cur.totalHt += r.totalHt;
-      } else {
-        m.set(key, {
-          region: r.region,
-          city: r.city,
-          quantity: r.quantity,
-          totalHt: r.totalHt,
-        });
-      }
-    }
-    return Array.from(m.values()).sort((a, b) => b.totalHt - a.totalHt);
-  }, [filteredRows]);
-
   const handleExportPdf = async () => {
     if (!pdfRootRef.current || pdfExporting || loading || error) return;
     try {
@@ -601,8 +553,6 @@ export default function CommercialDashboard() {
                               <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">FAMILLE</th>
                               <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">MARQUE</th>
                               <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">ARTICLE</th>
-                              <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">VILLE</th>
-                              <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">RÉGION</th>
                               <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-600">QTE</th>
                               <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-600">TOTAL HT</th>
                             </tr>
@@ -610,7 +560,7 @@ export default function CommercialDashboard() {
                           <tbody>
                             {mRows.map((row, index) => (
                               <tr
-                                key={`${row.year}-${row.monthIndex}-${row.productCode}-${row.familyCode}-${row.brand}-${row.article}-${row.city}-${index}`}
+                                key={`${row.year}-${row.monthIndex}-${row.productCode}-${row.familyCode}-${row.brand}-${row.article}-${index}`}
                                 className={index % 2 === 0 ? "bg-white dark:bg-slate-900" : "bg-slate-50 dark:bg-slate-800/40"}
                               >
                                 <td className="max-w-[120px] truncate px-2 py-1 align-top font-mono text-[10px]" title={row.productCode}>
@@ -621,8 +571,6 @@ export default function CommercialDashboard() {
                                 <td className="max-w-[200px] truncate px-2 py-1 align-top" title={row.article}>
                                   {row.article}
                                 </td>
-                                <td className="px-2 py-1">{row.city}</td>
-                                <td className="px-2 py-1">{row.region}</td>
                                 <td className="px-2 py-1 text-right tabular-nums">{formatIntegerFr(row.quantity)}</td>
                                 <td className="px-2 py-1 text-right font-medium tabular-nums text-slate-900 dark:text-slate-100">
                                   {formatCurrencyTnd(row.totalHt)}
@@ -632,7 +580,7 @@ export default function CommercialDashboard() {
                           </tbody>
                           <tfoot className="bg-amber-50/90 text-[11px] font-semibold dark:bg-amber-950/40">
                             <tr>
-                              <td colSpan={6} className="border-t border-slate-200 px-2 py-1 dark:border-slate-600">
+                              <td colSpan={4} className="border-t border-slate-200 px-2 py-1 dark:border-slate-600">
                                 Sous-total {MONTHS_FR[monthIndex]} {y}
                               </td>
                               <td className="border-t border-slate-200 px-2 py-1 text-right tabular-nums dark:border-slate-600">
@@ -668,41 +616,6 @@ export default function CommercialDashboard() {
                   </div>
                 </article>
 
-                <article className="overflow-hidden rounded-md border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-900">
-                  <h2 className="border-b border-slate-200 px-3 py-2 text-xs font-bold tracking-wide text-slate-700 uppercase dark:border-slate-600 dark:text-slate-200">
-                    RAPPORT PAR VILLE / RÉGION (CA HT)
-                  </h2>
-                  <div className="max-h-[320px] overflow-auto">
-                    <table className="w-full min-w-[480px] border-collapse text-[11px]">
-                      <thead className="sticky top-0 bg-slate-100 text-[10px] font-bold uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                        <tr>
-                          <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">Région</th>
-                          <th className="border-b border-slate-200 px-2 py-1 text-left dark:border-slate-600">Ville</th>
-                          <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-600">Qté</th>
-                          <th className="border-b border-slate-200 px-2 py-1 text-right dark:border-slate-600">CA HT</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {regionRows.map((rr) => (
-                          <tr
-                            key={`${rr.region}-${rr.city}`}
-                            className="border-b border-slate-100 dark:border-slate-700/80"
-                          >
-                            <td className="px-2 py-1.5">{rr.region}</td>
-                            <td className="px-2 py-1.5">{rr.city}</td>
-                            <td className="px-2 py-1.5 text-right tabular-nums">{formatIntegerFr(rr.quantity)}</td>
-                            <td className="px-2 py-1.5 text-right font-medium tabular-nums">
-                              {formatCurrencyTnd(rr.totalHt)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <p className="border-t border-slate-200 px-3 py-2 text-[10px] text-slate-500 dark:border-slate-600 dark:text-slate-400">
-                    Ville / région : répartition indicative (à remplacer par des champs `city` / `region` côté clients ou produits lorsqu’ils seront disponibles).
-                  </p>
-                </article>
               </div>
 
               <article className="h-fit rounded-md border border-slate-200 bg-white lg:sticky lg:top-2 dark:border-slate-600 dark:bg-slate-900">

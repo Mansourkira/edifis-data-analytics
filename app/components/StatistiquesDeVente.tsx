@@ -89,7 +89,7 @@ async function fetchFilterOptions() {
   const [productsRes, clientsRes, commercialsRes] = await Promise.all([
     supabase.from("products").select("code, name").order("name", { ascending: true }),
     resellerClientsQuery(supabase).order("name", { ascending: true }),
-    supabase.from("commercials").select("co_no, code, first_name").order("co_no", { ascending: true }),
+    supabase.from("commercials").select("co_no, code, first_name").eq("function", "Commercial").order("co_no", { ascending: true }),
   ]);
 
   if (productsRes.error) throw productsRes.error;
@@ -126,17 +126,21 @@ async function fetchFilterOptions() {
     .filter((c) => c.coNo)
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  return { products, clients, commercials };
+  return { products, clients, commercials, resellerCtNums: clients.map((c) => c.ctNum) };
 }
 
-async function fetchMonthlyStats(filters: SalesFilters): Promise<MonthlyAgg[]> {
+async function fetchMonthlyStats(filters: SalesFilters, resellerCtNums: string[]): Promise<MonthlyAgg[]> {
   const supabase = createBrowserSupabaseClient();
   let query = supabase
     .from("v_sales_monthly")
     .select("month_start, product_code, client_ct_num, commercial_co_no, qty_sold, total_ht")
     .order("month_start", { ascending: true });
 
-  if (filters.selectedClientCtNum) query = query.eq("client_ct_num", filters.selectedClientCtNum);
+  if (filters.selectedClientCtNum) {
+    query = query.eq("client_ct_num", filters.selectedClientCtNum);
+  } else if (resellerCtNums.length > 0) {
+    query = query.in("client_ct_num", resellerCtNums);
+  }
   if (filters.selectedCommercialCoNo) {
     const n = Number(filters.selectedCommercialCoNo);
     if (Number.isFinite(n)) query = query.eq("commercial_co_no", n);
@@ -161,6 +165,7 @@ export default function StatistiquesDeVente() {
   const [productOptions, setProductOptions] = useState<ProductOption[]>([]);
   const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
   const [commercialOptions, setCommercialOptions] = useState<CommercialOption[]>([]);
+  const [resellerCtNums, setResellerCtNums] = useState<string[]>([]);
 
   const now = new Date();
   const [filters, setFilters] = useState<SalesFilters>({
@@ -204,11 +209,12 @@ export default function StatistiquesDeVente() {
       try {
         setLoadingOptions(true);
         setError(null);
-        const { products, clients, commercials } = await fetchFilterOptions();
+        const { products, clients, commercials, resellerCtNums: ctNums } = await fetchFilterOptions();
         if (!active) return;
         setProductOptions(products);
         setClientOptions(clients);
         setCommercialOptions(commercials);
+        setResellerCtNums(ctNums);
       } catch (e) {
         if (!active) return;
         setError(e instanceof Error ? e.message : "Erreur de chargement des filtres");
@@ -228,7 +234,7 @@ export default function StatistiquesDeVente() {
       try {
         setLoadingStats(true);
         setError(null);
-        const rows = await fetchMonthlyStats(filters);
+        const rows = await fetchMonthlyStats(filters, resellerCtNums);
         if (!active) return;
         setMonthlyData(rows);
       } catch (e) {
@@ -242,7 +248,7 @@ export default function StatistiquesDeVente() {
     return () => {
       active = false;
     };
-  }, [filters]);
+  }, [filters, resellerCtNums]);
 
   const yearTotals = useMemo(() => {
     const totals = new Map<number, { quantity: number; totalHt: number }>();

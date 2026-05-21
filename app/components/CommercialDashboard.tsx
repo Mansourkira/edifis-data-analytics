@@ -141,7 +141,7 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
     supabase.from("products").select("*"),
     supabase.from("families").select("*"),
     resellerClientsQuery(supabase),
-    supabase.from("commercials").select("co_no, code, first_name"),
+    supabase.from("commercials").select("co_no, code, first_name").eq("function", "Commercial"),
   ]);
 
   if (productsResult.error) throw productsResult.error;
@@ -227,7 +227,8 @@ async function fetchDashboardData(): Promise<DashboardPayload> {
     }
 
     const clientCt = asString(line.client_ct_num);
-    const clientName = clientCt ? (clientByCtNum.get(clientCt) ?? clientCt) : "Non renseigné";
+    if (clientCt && !clientByCtNum.has(clientCt)) continue;
+    const clientName = clientCt ? (clientByCtNum.get(clientCt) ?? "Non renseigné") : "Non renseigné";
 
     const coRaw = line.commercial_co_no;
     const coNo = typeof coRaw === "number" ? coRaw : coRaw != null ? Number(coRaw) : NaN;

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Loader2, Printer, RefreshCw, Search } from "lucide-react";
-import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatCurrencyTnd } from "../lib/format-currency";
 import { parseSupabaseNumeric } from "../lib/parse-numeric";
@@ -355,19 +355,47 @@ export default function CommercialDashboard() {
     });
   }, [filteredRows]);
 
-  const pieData = useMemo(() => {
+  const aggregatedPieData = useMemo(() => {
     const byBrand = new Map<string, number>();
     for (const row of filteredRows) {
       byBrand.set(row.brand, (byBrand.get(row.brand) ?? 0) + row.totalHt);
     }
-    return Array.from(byBrand.entries())
+    
+    const sortedData = Array.from(byBrand.entries())
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
+    
+    const total = sortedData.reduce((sum, d) => sum + d.value, 0);
+    const threshold = total * 0.03; // 3% threshold
+    
+    const majorBrands: Array<{ name: string; value: number }> = [];
+    let othersSum = 0;
+    
+    for (const item of sortedData) {
+      if (item.value >= threshold && item.name !== "Sans marque") {
+        majorBrands.push(item);
+      } else if (item.name !== "Sans marque") {
+        othersSum += item.value;
+      }
+    }
+    
+    // Always include "Sans marque" as it's typically the largest
+    const sansMarque = sortedData.find(item => item.name === "Sans marque");
+    if (sansMarque) {
+      majorBrands.unshift(sansMarque);
+    }
+    
+    // Add "Autres" category if there are small brands
+    if (othersSum > 0) {
+      majorBrands.push({ name: "Autres", value: othersSum });
+    }
+    
+    return majorBrands;
   }, [filteredRows]);
 
   const pieTotal = useMemo(
-    () => pieData.reduce((sum, d) => sum + d.value, 0),
-    [pieData],
+    () => aggregatedPieData.reduce((sum, d) => sum + d.value, 0),
+    [aggregatedPieData],
   );
 
   const totals = useMemo(
@@ -491,7 +519,7 @@ export default function CommercialDashboard() {
           </div>
 
           <div className="absolute top-3 right-4 min-w-[200px] space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
-            {pieData.slice(0, 4).map((item, index) => (
+            {aggregatedPieData.slice(0, 4).map((item, index) => (
               <div key={item.name} className="flex items-center justify-between gap-3">
                 <span className="flex min-w-0 items-center gap-2">
                   <span
@@ -626,54 +654,39 @@ export default function CommercialDashboard() {
                   <ChartSizeGate className="h-full w-full">
                     {({ width, height }) => (
                       <ResponsiveContainer width={width} height={height}>
-                        <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
-                          <Pie
-                            data={pieData}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="42%"
-                            innerRadius={0}
-                            outerRadius={88}
-                            paddingAngle={pieData.length > 1 ? 1 : 0}
-                            label={false}
-                            stroke="#fff"
-                            strokeWidth={1}
-                          >
-                            {pieData.map((entry, index) => (
-                              <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
+                        <BarChart
+                          data={aggregatedPieData}
+                          layout="horizontal"
+                          margin={{ top: 4, right: 4, bottom: 4, left: 4 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke={theme === "dark" ? "#334155" : "#e2e8f0"} />
+                          <XAxis 
+                            type="number" 
+                            tick={{ fontSize: 10 }}
+                            tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+                            stroke={theme === "dark" ? "#94a3b8" : "#64748b"}
+                          />
+                          <YAxis 
+                            type="category" 
+                            dataKey="name" 
+                            tick={{ fontSize: 10 }}
+                            width={80}
+                            stroke={theme === "dark" ? "#94a3b8" : "#64748b"}
+                          />
                           <Tooltip
-                            formatter={(value) =>
-                              formatCurrencyTnd(Number(Array.isArray(value) ? value[0] : (value ?? 0)))
-                            }
+                            formatter={(value) => [
+                              formatCurrencyTnd(Number(Array.isArray(value) ? value[0] : (value ?? 0))),
+                              "CA HT"
+                            ]}
                             labelFormatter={(name) => String(name)}
                             contentStyle={tooltipContentStyle}
                           />
-                          <Legend
-                            verticalAlign="bottom"
-                            align="center"
-                            iconType="circle"
-                            wrapperStyle={{
-                              fontSize: "11px",
-                              lineHeight: "16px",
-                              paddingTop: "4px",
-                            }}
-                            formatter={(value, entry) => {
-                              const raw = entry as { payload?: { value?: number } };
-                              const v = raw?.payload?.value ?? 0;
-                              const pct =
-                                pieTotal > 0
-                                  ? new Intl.NumberFormat("fr-FR", {
-                                    minimumFractionDigits: 1,
-                                    maximumFractionDigits: 1,
-                                  }).format((v / pieTotal) * 100)
-                                  : "0,0";
-                              return `${String(value)} — ${formatCurrencyTnd(v)} (${pct}%)`;
-                            }}
-                          />
-                        </PieChart>
+                          <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                            {aggregatedPieData.map((entry, index) => (
+                              <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                            ))}
+                          </Bar>
+                        </BarChart>
                       </ResponsiveContainer>
                     )}
                   </ChartSizeGate>

@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, Loader2, Minus, Printer, Search, TrendingDown } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Minus,
+  Printer,
+  Search,
+  TrendingDown,
+} from "lucide-react";
 import { Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatCurrencyTnd } from "../lib/format-currency";
@@ -28,6 +37,8 @@ type ResellerRow = {
 
 const MONTHS = ["Jan", "Fev", "Mar", "Avr", "Mai", "Jun", "Jul", "Aou", "Sep", "Oct", "Nov", "Dec"];
 const DONUT_COLORS = ["#4f86c6", "#6baed6", "#9ecae1", "#f5b14c", "#f08080", "#9aa5b1", "#5f9ea0", "#cfa3ff"];
+const ROWS_PER_PAGE_OPTIONS = [10, 25, 50, 100] as const;
+const DEFAULT_ROWS_PER_PAGE = 25;
 
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -200,6 +211,8 @@ export default function PalmaresRevendeurs() {
   const [articleSearch, setArticleSearch] = useState("");
   const [articleCode, setArticleCode] = useState("");
   const [year, setYear] = useState("2026");
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState<number>(DEFAULT_ROWS_PER_PAGE);
   const [generatedAt, setGeneratedAt] = useState(new Date());
 
   const yearNum = Number(year);
@@ -265,6 +278,26 @@ export default function PalmaresRevendeurs() {
     () => buildResellerRows(lines, clientByCt, productPrices, yearNum, articleCode),
     [lines, clientByCt, productPrices, yearNum, articleCode],
   );
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage));
+  const safePage = Math.min(page, totalPages);
+
+  useEffect(() => {
+    setPage(1);
+  }, [articleCode, year, rowsPerPage]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const paginatedRows = useMemo(() => {
+    if (pdfExporting) return rows;
+    const start = (safePage - 1) * rowsPerPage;
+    return rows.slice(start, start + rowsPerPage);
+  }, [rows, safePage, rowsPerPage, pdfExporting]);
+
+  const pageStart = rows.length === 0 ? 0 : (safePage - 1) * rowsPerPage + 1;
+  const pageEnd = Math.min(safePage * rowsPerPage, rows.length);
 
   const totals = useMemo(
     () =>
@@ -447,7 +480,7 @@ export default function PalmaresRevendeurs() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row, idx) => {
+                  {paginatedRows.map((row, idx) => {
                     const indicator =
                       row.evolVsPrev >= 6
                         ? { icon: ArrowUpRight, color: "text-emerald-600", label: "Hausse" }
@@ -546,6 +579,58 @@ export default function PalmaresRevendeurs() {
                   </tr>
                 </tbody>
               </table>
+            </div>
+
+            <div
+              data-pdf-ignore
+              className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3 dark:border-slate-600"
+            >
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                {rows.length === 0
+                  ? "Aucun revendeur"
+                  : `Affichage ${pageStart}–${pageEnd} sur ${rows.length} revendeur${rows.length > 1 ? "s" : ""}`}
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                  Lignes par page
+                  <select
+                    value={rowsPerPage}
+                    onChange={(e) => setRowsPerPage(Number(e.target.value))}
+                    className="h-8 rounded border border-slate-300 bg-white px-2 text-xs dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+                  >
+                    {ROWS_PER_PAGE_OPTIONS.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={safePage <= 1}
+                    className="inline-flex h-8 items-center gap-1 rounded border border-slate-300 bg-white px-2 text-xs text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                    aria-label="Page précédente"
+                  >
+                    <ChevronLeft className="size-4" />
+                    Préc.
+                  </button>
+                  <span className="min-w-[4.5rem] px-2 text-center text-xs tabular-nums text-slate-600 dark:text-slate-400">
+                    {safePage} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safePage >= totalPages}
+                    className="inline-flex h-8 items-center gap-1 rounded border border-slate-300 bg-white px-2 text-xs text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                    aria-label="Page suivante"
+                  >
+                    Suiv.
+                    <ChevronRight className="size-4" />
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="grid gap-4 border-t border-slate-200 px-5 py-4 dark:border-slate-600 md:grid-cols-[1fr_360px]">
